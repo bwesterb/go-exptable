@@ -38,7 +38,7 @@ func (t *Table) Exp(r, s *big.Int) {
 }
 
 func (t *Table) expTwoBMinusC(r, s *big.Int) {
-	var s2, carry big.Int
+	var s2, tmp, carry big.Int
 	r.SetUint64(1)
 	s2.Set(s)
 	for i := uint(0); i < t.n; i++ {
@@ -50,21 +50,28 @@ func (t *Table) expTwoBMinusC(r, s *big.Int) {
 		if ws == 0 {
 			continue
 		}
-		r.Mul(r, &t.v[(i*t.wm)+(ws-1)])
+
+		// Internally an a.Mul(b, c) does a big allocation.  It stores this
+		// big allocation as capacity in a.  It can reuse the capacity of a
+		// if b and c don't overlap with a.  So we use a tmp big.Int to prevent
+		// an allocation on every iteration of the loop.
+		tmp.Mul(r, &t.v[(i*t.wm)+(ws-1)])
+		carry.Rsh(&tmp, t.mB)
+		r.And(&tmp, &t.mBMask)
+
+		tmp.Mul(&carry, &t.mC)
+		r.Add(r, &tmp)
+
 		carry.Rsh(r, t.mB)
 		r.And(r, &t.mBMask)
-		carry.Mul(&carry, &t.mC)
-		r.Add(r, &carry)
-		carry.Rsh(r, t.mB)
-		r.And(r, &t.mBMask)
-		carry.Mul(&carry, &t.mC)
-		r.Add(r, &carry)
+		tmp.Mul(&carry, &t.mC)
+		r.Add(r, &tmp)
 	}
 	r.Mod(r, &t.m)
 }
 
 func (t *Table) expDefault(r, s *big.Int) {
-	var s2 big.Int
+	var s2, tmp big.Int
 	r.SetUint64(1)
 	s2.Set(s)
 	for i := uint(0); i < t.n; i++ {
@@ -76,8 +83,8 @@ func (t *Table) expDefault(r, s *big.Int) {
 		if ws == 0 {
 			continue
 		}
-		r.Mul(r, &t.v[(i*t.wm)+(ws-1)])
-		r.Mod(r, &t.m)
+		tmp.Mul(r, &t.v[(i*t.wm)+(ws-1)])
+		r.Mod(&tmp, &t.m)
 	}
 }
 
@@ -112,15 +119,14 @@ func (t *Table) Compute(b, m *big.Int, w uint) {
 	t.v = make([]big.Int, lenV)
 
 	// Compute table
-	var x big.Int
-	var rb big.Int
+	var x, rb, tmp big.Int
 	x.Set(b)
 	rb.Set(b)
 	for i := uint(0); i < lenV; i += t.wm {
 		for j := uint(0); j < t.wm; j++ {
 			t.v[i+j].Set(&x)
-			x.Mul(&x, &rb)
-			x.Mod(&x, &t.m)
+			tmp.Mul(&x, &rb)
+			x.Mod(&tmp, &t.m)
 		}
 		rb.Set(&x)
 	}
